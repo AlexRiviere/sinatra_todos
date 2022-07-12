@@ -73,7 +73,7 @@ class SessionPersistence
   
   def update_list_name(id, new_name)
     list = find_list(id)
-    list[:name] = list_name
+    list[:name] = new_name
   end
   
   def create_new_todo(list_id, todo_name)
