@@ -34,8 +34,8 @@ helpers do
     
     complete_lists, incomplete_lists = lists.partition { |list| list_complete?(list) }
         
-    incomplete_lists.each { |list| yield list, lists.index(list) }
-    complete_lists.each { |list| yield list, lists.index(list) }
+    incomplete_lists.each(&block)
+    complete_lists.each(&block)
     
   end
   
@@ -46,16 +46,42 @@ helpers do
     complete_todos.each { |todo| yield todo, todos.index(todo) }
   end
   
+  class SessionPersistence
+    
+    def initialize(session)
+      @session = session
+      @session[:lists] ||= []
+    end
+    
+    def find_list(id)
+      @session[:lists].find { |list| list[:id] == id }
+    end
+    
+    def all_lists
+      @session[:lists]
+    end
   
-  def next_todo_id(todos)
-    max = todos.map { |todo| todo[:id] }.max || 0
+  end
+  
+  # Validate the list number that is passed to the app
+
+  def load_list(id)
+    list = @storage.find_list(id)
+    return list if list
+    
+    session[:error] = "The specified list was not found."
+    redirect "/lists"
+  end
+  
+  def next_element_id(elements)
+    max = elements.map { |element| element[:id] }.max || 0
     max + 1
   end
   
 end
 
 before do 
-  session[:lists] ||= []
+  @storage = SessionPersistence.new(session)
 end
 
 get '/' do
@@ -77,7 +103,7 @@ end
 def error_for_list_name(name)
   if !(1..100).cover? name.size
     'List name must be between 1 and 100 characters.'
-  elsif session[:lists].any? { |list| list[:name] == name }
+  elsif @storage.all_lists.any? { |list| list[:name] == name }
     'List name must be unique.'    
   end
 end
@@ -90,16 +116,6 @@ def error_for_todo(name)
   end
 end
 
-# Validate the list number that is passed to the app
-
-def load_list(index)
-  list = session[:lists][index] if index && session[:lists][index]
-  return list if list
-  
-  session[:error] = "The specified list was not found."
-  redirect "/lists"
-end
-
 # Create a new list
 post '/lists' do
   list_name = params[:list_name].strip
@@ -109,15 +125,20 @@ post '/lists' do
     session[:error] = error
     erb :new_list, layout: :layout
   else
-    session[:lists] << {name: list_name, todos: []}
+    id = next_element_id(session[:lists])
+    session[:lists] << {id: id, name: list_name, todos: [] }
     session[:success] = 'The list has been created.'
     redirect '/lists'
   end
 end
+
 #View a single todo list
 get '/lists/:id' do
-  @list_id = params[:id].to_i
-  @list = load_list(@list_id)
+  id = params[:id].to_i
+  @list = load_list(id)
+  @list_name = @list[:name]
+  @list_id = @list[:id]
+  @todos = @list[:todos]
   erb :list, layout: :layout
 end
 
@@ -148,7 +169,7 @@ end
 # Delete a Todo List
 post '/lists/:id/destroy' do
   id = params[:id].to_i
-  session[:lists].delete_at(id)
+  session[:lists].reject! { |list| list[:id] == id }
   if env["HTTP_X_REQUESTED_WITH"] == "XMLHttpRequest"
     "/lists"
   else
@@ -169,7 +190,7 @@ post '/lists/:list_id/todos' do
     erb :list, layout: :layout
   else
     
-    id = next_todo_id(@list[:todos])
+    id = next_element_id(@list[:todos])
     @list[:todos] << {id: id, name: text, completed: false}
     
     session[:success] = 'The todo was added.'
